@@ -28,32 +28,28 @@ test "basic add functionality" {
 const host = std.net.Address{ .in = std.net.Ip4Address.init(.{ 127, 0, 0, 1 }, 8000) };
 
 pub fn start() !void {
-    const socket = try posix.socket(host.any.family, posix.SOCK.STREAM, posix.IPPROTO.TCP);
-    defer posix.close(socket);
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
 
-    try posix.setsockopt(socket, posix.SOL.SOCKET, posix.SO.REUSEADDR, &std.mem.toBytes(@as(c_int, 1)));
-    try posix.bind(socket, &host.any, host.getOsSockLen());
-    try posix.listen(socket, 128);
+    const allocator = arena.allocator();
 
-    while (true) {
-        var fd_p: net.Address = undefined;
-        var cl_sock_len: posix.socklen_t = @sizeOf(net.Address);
-        const new_sock = try posix.accept(socket, &fd_p.any, &cl_sock_len, 0);
-        defer posix.close(new_sock);
+    var server = try host.listen(.{ .reuse_address = true });
+    defer server.deinit();
 
-        const read_buf: *[1024]u8 = undefined;
-        try read(new_sock, read_buf);
-        _ = try posix.write(new_sock, "Hello world");
-    }
+    const addr = server.listen_address;
+    std.debug.print("Listening on {}, access this port to end the program\n", .{addr.getPort()});
+
+    var client = try server.accept();
+    defer client.stream.close();
+
+    std.debug.print("Connection received! {} is sending data.\n", .{client.address});
+
+    const message = try client.stream.reader().readAllAlloc(allocator, 1024);
+    defer allocator.free(message);
+    std.debug.print("{s}", .{message});
+
+    const writer = client.stream.writer();
+    _ = try writer.write(message);
 }
 
-fn read(socket: posix.socket_t, read_buf: []u8) !void {
-    const bytes_read = try posix.read(socket, read_buf);
-
-    if (bytes_read == 0) {
-        std.debug.print("no bytes read", .{});
-    } else {
-        std.debug.print("{s}", .{read_buf});
-    }
-}
 // fn write(socket: posix.socket_t, msg: []const u8) !void {}
