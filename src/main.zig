@@ -39,28 +39,74 @@ const ok =
 
 const html = "text/html";
 
-pub fn handleRequest(allocator: std.mem.Allocator, req: http.request.Request) anyerror!http.response.Response {
-    var resp = http.response.Response{};
+pub fn handleRequest(allocator: std.mem.Allocator, r_writer: *http.response.ResponseWriter, req: http.request.Request) anyerror!void {
     const target = req.head.request_line.target;
     if (std.mem.eql(u8, target, "/yourproblem")) {
-        resp.status = 400;
-        // resp.body = try allocator.dupe(u8, "Your problem is not my problem\n");
-        resp.body = bad_request;
+        const headers = http.response.Headers{
+            .content_type = html,
+            .content_length = try std.fmt.allocPrint(allocator, "{}", .{bad_request.len}),
+        };
+        const resp = http.response.Response{
+            .status = 400,
+            .headers = headers,
+            .body = bad_request,
+        };
+        // try r_writer.writer.print("{f}", .{resp});
+        _ = resp;
     } else if (std.mem.eql(u8, target, "/myproblem")) {
-        resp.status = 500;
-        // resp.body = try allocator.dupe(u8, "Woopsie, my bad\n");
-        resp.body = internal_error;
+        const headers = http.response.Headers{
+            .content_type = html,
+            .content_length = try std.fmt.allocPrint(allocator, "{}", .{bad_request.len}),
+        };
+        const resp = http.response.Response{
+            .status = 500,
+            .headers = headers,
+            .body = internal_error,
+        };
+        // try r_writer.writer.print("{f}", .{resp});
+        _ = resp;
     } else if (std.mem.startsWith(u8, target, "/httpbin/")) {
-        _ = std.mem.trim(u8, target, "/httpbin/");
-        resp.body = ok;
+        const location = std.mem.trim(u8, target, "/httpbin/");
+        const url = try std.mem.concat(allocator, u8, &[_][]const u8{ "https://httpbin.org/", location });
+
+        var client = std.http.Client{ .allocator = allocator };
+
+        var reques = try client.request(.GET, try std.Uri.parse(url), .{});
+        defer reques.deinit();
+        try reques.sendBodiless();
+
+        const redirect_buffer = try client.allocator.alloc(u8, 8 * 1024);
+        defer client.allocator.free(redirect_buffer);
+
+        var response = try reques.receiveHead(redirect_buffer);
+        try r_writer.writeStatusLine(response.head.status);
+        try r_writer.writeHeaders(http.response.Headers{});
+
+        //TODO better error handling here
+        if (response.head.status != .ok) {
+            return error.BAD;
+        }
+
+        var transfer_buffer: [64]u8 = undefined;
+        const repsonse_reader = response.reader(&transfer_buffer);
+        // use chunkwriter thing...
+        try r_writer.writeChunked(repsonse_reader);
+        // try r_writer.writeChunkedEnd();
+        //
     } else {
-        // resp.body = try allocator.dupe(u8, "All good, frfr\n");
-        resp.body = ok;
+        const headers = http.response.Headers{
+            .content_type = html,
+            .content_length = try std.fmt.allocPrint(allocator, "{}", .{ok.len}),
+        };
+        const resp = http.response.Response{
+            .status = 400,
+            .headers = headers,
+            .body = ok,
+        };
+        _ = resp;
+        // try r_writer.writer.print("{f}", .{resp});
     }
-    resp.content_type = html;
     // const body_len: u64 = resp.body.len;
-    resp.content_length = try std.fmt.allocPrint(allocator, "{}", .{resp.body.len});
-    return resp;
 }
 
 pub fn main() !void {

@@ -11,7 +11,7 @@ pub const Config = struct {
     addr: std.net.Address,
 };
 
-pub const HandlerFunc = *const fn (allocator: std.mem.Allocator, r: request.Request) anyerror!response.Response;
+pub const HandlerFunc = *const fn (allocator: std.mem.Allocator, r_writer: *response.ResponseWriter, r: request.Request) anyerror!void;
 
 pub const Server = struct {
     addr: std.net.Address,
@@ -30,7 +30,6 @@ pub const Server = struct {
 
         var write_buf = std.mem.zeroes([1024]u8);
         var client_writer = connection.stream.writer(&write_buf);
-        // var client_writer = std.fs.File.stdout().writer(&write_buf);
 
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
@@ -42,9 +41,11 @@ pub const Server = struct {
 
         std.debug.print("Head :\n{f}", .{req.head});
         std.debug.print("Body :\n{s}\n", .{req.body});
-        const resp = try self.handler(self.allocator, req);
+        var response_writer = response.ResponseWriter{ .writer = &client_writer.interface };
+        const resp = try self.handler(self.allocator, &response_writer, req);
+        _ = resp;
 
-        try client_writer.interface.print("{f}", .{resp});
+        // try client_writer.interface.print("{f}", .{resp});
 
         // //write the response
         // // Maybe response should be an object with a format function?
