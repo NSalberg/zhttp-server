@@ -14,6 +14,8 @@ pub const Trailer = struct {
     value: []const u8,
 };
 
+pub const Error = std.Io.Reader.Error || std.Io.Writer.Error;
+/// See the `Reader` implementation for detailed diagnostics.
 pub const ResponseWriter = struct {
     writer: *std.Io.Writer,
     state: State = .status_line,
@@ -101,7 +103,7 @@ pub const ResponseWriter = struct {
     pub fn writeResponse(
         self: *ResponseWriter,
         response: Response,
-    ) !void {
+    ) Error!void {
         try self.writeStatusLine(@enumFromInt(response.status));
         try self.writeHeaders(response.headers);
         if (response.body) |b| {
@@ -122,6 +124,8 @@ pub const ResponseWriter = struct {
             try self.writeChunkedEnd();
 
             try self.writeTrailers(response.trailers);
+        } else {
+            std.debug.print("here\n da", .{});
         }
     }
 };
@@ -134,5 +138,5 @@ pub const Response = struct {
     headers: Headers,
     trailers: []Trailer = &.{},
     body_reader: ?*std.Io.Reader = null,
-    body: ?[]const u8 = &.{},
+    body: ?[]const u8 = null,
 };

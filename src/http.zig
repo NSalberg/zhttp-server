@@ -44,9 +44,8 @@ pub const Server = struct {
         var response_writer = response.ResponseWriter{ .writer = &client_writer.interface };
         const resp = try self.handler(self.allocator, &response_writer, req);
         _ = resp;
-
-        // try client_writer.interface.print("{f}", .{resp});
-        try client_writer.interface.flush();
+        // if we cant write here we're fucked so dont take down the ship with it
+        client_writer.interface.flush() catch {};
     }
 
     pub fn serve(self: *Server) !void {

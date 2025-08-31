@@ -66,6 +66,23 @@ pub fn handleRequest(allocator: std.mem.Allocator, r_writer: *http.response.Resp
         };
         // try r_writer.writer.print("{f}", .{resp});
         try r_writer.writeResponse(resp);
+    } else if (std.mem.eql(u8, target, "/video")) {
+        const headers = http.response.Headers{
+            .content_type = "video/mp4",
+        };
+        var resp = http.response.Response{
+            .status = 200,
+            .headers = headers,
+        };
+        var video_file = try std.fs.openFileAbsolute("/home/nathan/dev/zig-stuff/http-server/assets/vim.mp4", .{ .mode = .read_only });
+        var read_buf: [1024]u8 = undefined;
+        var video_reader = video_file.reader(&read_buf);
+        resp.body_reader = &video_reader.interface;
+        // if we can't write were fucked so just keeper movin
+        _ = r_writer.writeResponse(resp) catch |err| switch (err) {
+            error.WriteFailed => {},
+            else => return err,
+        };
     } else if (std.mem.startsWith(u8, target, "/httpbin/")) {
         const location = std.mem.trim(u8, target, "/httpbin/");
         const url = try std.mem.concat(allocator, u8, &[_][]const u8{ "https://httpbin.org/", location });
