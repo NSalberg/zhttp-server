@@ -39,6 +39,7 @@ const ok =
 
 const html = "text/html";
 
+// this doesn't need to be passed a response writer just a *Io.Writer, we can create the Response writer ourselves
 pub fn handleRequest(allocator: std.mem.Allocator, r_writer: *http.response.ResponseWriter, req: http.request.Request) anyerror!void {
     const target = req.head.request_line.target;
     if (std.mem.eql(u8, target, "/yourproblem")) {
@@ -52,11 +53,11 @@ pub fn handleRequest(allocator: std.mem.Allocator, r_writer: *http.response.Resp
             .body = bad_request,
         };
         // try r_writer.writer.print("{f}", .{resp});
-        _ = resp;
+        try r_writer.writeResponse(resp);
     } else if (std.mem.eql(u8, target, "/myproblem")) {
         const headers = http.response.Headers{
             .content_type = html,
-            .content_length = try std.fmt.allocPrint(allocator, "{}", .{bad_request.len}),
+            .content_length = try std.fmt.allocPrint(allocator, "{}", .{internal_error.len}),
         };
         const resp = http.response.Response{
             .status = 500,
@@ -64,7 +65,7 @@ pub fn handleRequest(allocator: std.mem.Allocator, r_writer: *http.response.Resp
             .body = internal_error,
         };
         // try r_writer.writer.print("{f}", .{resp});
-        _ = resp;
+        try r_writer.writeResponse(resp);
     } else if (std.mem.startsWith(u8, target, "/httpbin/")) {
         const location = std.mem.trim(u8, target, "/httpbin/");
         const url = try std.mem.concat(allocator, u8, &[_][]const u8{ "https://httpbin.org/", location });
@@ -91,8 +92,6 @@ pub fn handleRequest(allocator: std.mem.Allocator, r_writer: *http.response.Resp
         const repsonse_reader = response.reader(&transfer_buffer);
         // use chunkwriter thing...
         try r_writer.writeChunked(repsonse_reader);
-        // try r_writer.writeChunkedEnd();
-        //
     } else {
         const headers = http.response.Headers{
             .content_type = html,
@@ -103,10 +102,8 @@ pub fn handleRequest(allocator: std.mem.Allocator, r_writer: *http.response.Resp
             .headers = headers,
             .body = ok,
         };
-        _ = resp;
-        // try r_writer.writer.print("{f}", .{resp});
+        try r_writer.writeResponse(resp);
     }
-    // const body_len: u64 = resp.body.len;
 }
 
 pub fn main() !void {

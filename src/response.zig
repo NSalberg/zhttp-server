@@ -53,6 +53,13 @@ pub const ResponseWriter = struct {
         self.state = next_state;
     }
 
+    pub fn writeTrailers(self: *ResponseWriter, trailers: map.CaseInsensitiveHashMap([]const u8)) !void {
+        var trailer_it = trailers.iterator();
+        while (trailer_it.next()) |kv| {
+            try self.writer.print("{s}: {s}\r\n", .{ kv.key_ptr.*, kv.value_ptr.* });
+        }
+    }
+
     // writes chunked bytes from reader until an EOF is reached;
     pub fn writeChunked(self: *ResponseWriter, reader: *std.Io.Reader) !void {
         assert(self.state == .chunk_body);
@@ -68,7 +75,6 @@ pub const ResponseWriter = struct {
             // std.debug.print("\nbuffered: {s}\n", .{read_buffered});
             if (read_buffered.len > 0) {
                 @branchHint(.likely);
-
                 const chunk_head_buf = try self.writer.writableArray(chunk_header_template.len);
                 @memcpy(chunk_head_buf, chunk_header_template);
                 writeHex(chunk_head_buf[1..chunk_len_digits], read_buffered.len);
@@ -87,12 +93,6 @@ pub const ResponseWriter = struct {
         try self.writer.writeAll("0\r\n\r\n");
     }
 
-    pub fn writeChunkedEnd(self: @This()) std.Io.Writer.Error!void {
-        try self.writer.writeAll("0\r\n\r\n");
-    }
-    // pub fn writeTrailers(self: @This(), *std.Io.Writer){
-    // }
-
     fn writeHex(buf: []u8, x: usize) void {
         assert(std.mem.allEqual(u8, buf, '0'));
         const base = 16;
@@ -106,24 +106,30 @@ pub const ResponseWriter = struct {
         }
     }
 
-    ///if content-lenght is null this will writeChunked
-    /// this is is bad... need a reader for chunked?
-    pub fn format(
-        self: @This(),
-        writer: *std.Io.Writer,
-    ) std.Io.Writer.Error!void {
-        try self.writeStatusLine(writer);
-        try self.writeHeaders(writer);
-        try writer.writeAll(self.body);
+    pub fn writeResponse(
+        self: *ResponseWriter,
+        response: Response,
+    ) !void {
+        try self.writeStatusLine(@enumFromInt(response.status));
+        try self.writeHeaders(response.headers);
+        if (response.body) |b| {
+            try self.writer.writeAll(b);
+        } else if (response.body_reader) |br| {
+            try self.writeChunked(br);
+        }
+        if (response.trailers) |t| {
+            try self.writeTrailers(t);
+        }
     }
 };
 
 ///writing should be decoupled from the response?...
 ///state could be kept to ensure functions are called in the right order
+///
 pub const Response = struct {
     status: u16 = 200,
     headers: Headers,
     trailers: ?map.CaseInsensitiveHashMap([]const u8) = null,
     body_reader: ?*std.Io.Reader = null,
-    body: []const u8 = &.{},
+    body: ?[]const u8 = &.{},
 };

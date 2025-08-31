@@ -46,20 +46,6 @@ pub const Server = struct {
         _ = resp;
 
         // try client_writer.interface.print("{f}", .{resp});
-
-        // //write the response
-        // // Maybe response should be an object with a format function?
-        // try resp.writeStatusLine(&client_writer.interface);
-        // var headers = map.CaseInsensitiveHashMap([]const u8).init(arena.allocator());
-        //
-        // //convert content length to string
-        // const max_len = 20;
-        // var buf: [max_len]u8 = undefined;
-        // const content_length = try std.fmt.bufPrint(&buf, "{d}", .{0});
-        //
-        // try response.getDefaultHeaders(&headers, content_length);
-        // try response.writeHeaders(&client_writer.interface, &headers);
-
         try client_writer.interface.flush();
     }
 
