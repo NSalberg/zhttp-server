@@ -9,6 +9,11 @@ pub const Headers = struct {
     headers: ?map.CaseInsensitiveHashMap([]const u8) = null,
 };
 
+pub const Trailer = struct {
+    name: []const u8,
+    value: []const u8,
+};
+
 pub const ResponseWriter = struct {
     writer: *std.Io.Writer,
     state: State = .status_line,
@@ -53,44 +58,31 @@ pub const ResponseWriter = struct {
         self.state = next_state;
     }
 
-    pub fn writeTrailers(self: *ResponseWriter, trailers: map.CaseInsensitiveHashMap([]const u8)) !void {
-        var trailer_it = trailers.iterator();
-        while (trailer_it.next()) |kv| {
-            try self.writer.print("{s}: {s}\r\n", .{ kv.key_ptr.*, kv.value_ptr.* });
-        }
-    }
-
     // writes chunked bytes from reader until an EOF is reached;
-    pub fn writeChunked(self: *ResponseWriter, reader: *std.Io.Reader) !void {
+    pub fn writeChunked(self: *ResponseWriter, buf: []const u8) !void {
         assert(self.state == .chunk_body);
-        std.debug.print("\nbuffered: adfasdf \n", .{});
         const chunk_len_digits = 8;
         const chunk_header_template = ("0" ** chunk_len_digits) ++ "\r\n";
 
-        while (true) {
-            // _ = try reader.stream(self.writer);
+        // std.debug.print("\nbuffered: {s}\n", .{read_buffered});
+        const chunk_head_buf = try self.writer.writableArray(chunk_header_template.len);
+        @memcpy(chunk_head_buf, chunk_header_template);
+        writeHex(chunk_head_buf[1..chunk_len_digits], buf.len);
 
-            const read_buffered = reader.buffer[reader.seek..reader.end];
+        try self.writer.writeAll(buf);
+        try self.writer.writeAll("\r\n");
+    }
 
-            // std.debug.print("\nbuffered: {s}\n", .{read_buffered});
-            if (read_buffered.len > 0) {
-                @branchHint(.likely);
-                const chunk_head_buf = try self.writer.writableArray(chunk_header_template.len);
-                @memcpy(chunk_head_buf, chunk_header_template);
-                writeHex(chunk_head_buf[1..chunk_len_digits], read_buffered.len);
+    pub fn writeChunkedEnd(self: *ResponseWriter) !void {
+        try self.writer.writeAll("0\r\n");
+    }
 
-                try self.writer.writeAll(read_buffered);
-                try self.writer.writeAll("\r\n");
-                reader.toss(read_buffered.len);
-            }
-
-            _ = reader.fillMore() catch |err| switch (err) {
-                error.EndOfStream => break,
-                else => |e| return e,
-            };
+    pub fn writeTrailers(self: *ResponseWriter, trailers: []Trailer) !void {
+        for (trailers) |t| {
+            try self.writer.print("{s}: {s}\r\n", .{ t.name, t.value });
         }
 
-        try self.writer.writeAll("0\r\n\r\n");
+        try self.writer.writeAll("\r\n");
     }
 
     fn writeHex(buf: []u8, x: usize) void {
@@ -115,10 +107,21 @@ pub const ResponseWriter = struct {
         if (response.body) |b| {
             try self.writer.writeAll(b);
         } else if (response.body_reader) |br| {
-            try self.writeChunked(br);
-        }
-        if (response.trailers) |t| {
-            try self.writeTrailers(t);
+            while (true) {
+                const buffered = br.buffered();
+                if (buffered.len > 0) {
+                    @branchHint(.likely);
+                    try self.writeChunked(buffered);
+                    br.toss(buffered.len);
+                }
+                _ = br.fillMore() catch |err| switch (err) {
+                    error.EndOfStream => break,
+                    else => |e| return e,
+                };
+            }
+            try self.writeChunkedEnd();
+
+            try self.writeTrailers(response.trailers);
         }
     }
 };
@@ -129,7 +132,7 @@ pub const ResponseWriter = struct {
 pub const Response = struct {
     status: u16 = 200,
     headers: Headers,
-    trailers: ?map.CaseInsensitiveHashMap([]const u8) = null,
+    trailers: []Trailer = &.{},
     body_reader: ?*std.Io.Reader = null,
     body: ?[]const u8 = &.{},
 };

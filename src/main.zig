@@ -83,7 +83,7 @@ pub fn handleRequest(allocator: std.mem.Allocator, r_writer: *http.response.Resp
         try r_writer.writeStatusLine(response.head.status);
         try r_writer.writeHeaders(http.response.Headers{});
 
-        //TODO better error handling here
+        // TODO: better error handling here
         if (response.head.status != .ok) {
             return error.BAD;
         }
@@ -91,7 +91,40 @@ pub fn handleRequest(allocator: std.mem.Allocator, r_writer: *http.response.Resp
         var transfer_buffer: [64]u8 = undefined;
         const repsonse_reader = response.reader(&transfer_buffer);
         // use chunkwriter thing...
-        try r_writer.writeChunked(repsonse_reader);
+        // try r_writer.writeChunked(repsonse_reader);
+        var sha = std.crypto.hash.sha2.Sha256.init(.{});
+
+        var body_len: usize = 0;
+
+        while (true) {
+            const read_buffered = repsonse_reader.buffer[repsonse_reader.seek..repsonse_reader.end];
+
+            if (read_buffered.len > 0) {
+                @branchHint(.likely);
+                sha.update(read_buffered);
+                body_len += read_buffered.len;
+                try r_writer.writeChunked(read_buffered);
+                repsonse_reader.toss(read_buffered.len);
+            }
+            _ = repsonse_reader.fillMore() catch |err| switch (err) {
+                error.EndOfStream => break,
+                else => |e| return e,
+            };
+        }
+        try r_writer.writeChunkedEnd();
+        const final_sha = sha.finalResult();
+        // const hex_str = try std.fmt.bufPrint(&final_sha, "{s}", .{std.fmt.bytesToHex(final_sha)});
+        var trailers: [2]http.response.Trailer = .{
+            http.response.Trailer{
+                .name = "X-Content-SHA256",
+                .value = try std.fmt.allocPrint(allocator, "{b64}", .{final_sha}),
+            },
+            http.response.Trailer{
+                .name = "X-Content-Length",
+                .value = try std.fmt.allocPrint(allocator, "{d}", .{body_len}),
+            },
+        };
+        try r_writer.writeTrailers(&trailers);
     } else {
         const headers = http.response.Headers{
             .content_type = html,
